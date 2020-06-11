@@ -31,7 +31,6 @@
 // 1. Create the ring
 // 2. Check whether non-vectored read is supported using io_uring_probe
 // 3. If so, submit read(v) operations
-// -- optional register fd's step, probably not-useful for onetime use 
 // 4. Reap read-completed completion queue entries
 // 5. Tear-down
 
@@ -40,17 +39,27 @@
 
 #define NUM_FILES 64
 
-struct read_data { 
-	const char* filename; 
-	void* buf; 
-	unsigned nbytes;
-	off_t offset; 	
+struct RIOVec { 
+	void *fBuffer; 
+	off_t fOffset; 
+	size_t fSize; 
+	size_t fOutBytes; 
 }; 
 
-static int prep_reads(struct io_uring *ring, int num_files) { 
+struct ReadData { 
+	const char* pathname; 
+	struct RIOVec io_data; 
+}; 
+
+static int prep_reads(struct io_uring *ring, ReadData *files, int num_files) { 
 	struct io_uring_sqe *sqe; 
 	int fd = -1; 
-	//for file in file_vec { 
+	for (int i = 0; i < num_files; i++) { 
+		fd = open(files[i].pathname, O_RDONLY); 
+		if (fd < 0) { 
+			perror("open"); 
+			return 1; 
+		}	
 		sqe = io_uring_get_sqe(ring); 
 		if (!sqe) { 
 			fprintf(stderr, "sqe get failed\n"); 
@@ -58,7 +67,7 @@ static int prep_reads(struct io_uring *ring, int num_files) {
 		}
 
 		io_uring_prep_read(sqe, fd, 0, 0, 0); 
-	//}
+	}
 	return 0; 
 }
 
@@ -67,6 +76,7 @@ static int reap_reads(struct io_uring *ring, int num_files) {
 	int ret; 
 
 	for (int i = 0; i < num_files; i++) { 
+		// won't hang, may return failure cqe 
 		ret = io_uring_wait_cqe(ring, &cqe); 
 		if (ret) { 
 			fprintf(stderr, "wait cqe: %d\n", ret); 
@@ -93,8 +103,16 @@ int main(int argc, char* argv[]) {
 		return 1; 
 	}
 	free(p); 
+	
+	ReadData files[NUM_FILES]; 
+	files[0].pathname = "file.txt"; 
+	files[0].io_data.fBuffer = NULL; 
+	files[0].io_data.fOffset = 0; 
+	files[0].io_data.fSize = 0; 
+	files[0].io_data.fOutBytes = 0; 
 
-	ret = prep_reads(&ring, NUM_FILES); 
+	// ret = prep_reads(&ring, files, NUM_FILES); 
+	ret = prep_reads(&ring, files, 1);
 	if (ret) {
 	    fprintf(stderr, "prep reads failed: %d\n", ret); 
 		return 1; 		
