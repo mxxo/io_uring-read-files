@@ -1,6 +1,7 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "liburing.h"
 #include "liburing/io_uring.h"
@@ -75,7 +76,7 @@ static int reap_reads(struct io_uring *ring, ReadData files[], int num_files) {
 			return 1; 
 		}
 		if (cqe->res < 0) { 
-			fprintf(stderr, "read failed: %d\n", cqe->res); 
+			fprintf(stderr, "read file[%lu] failed: %s\n", index, strerror(-cqe->res)); 
 			return 1; 
 		}
 		files[index].io_data.fOutBytes = (size_t)cqe->res; 
