@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "liburing.h"
 #include "liburing/io_uring.h"
@@ -22,6 +23,7 @@
 
 struct RIOVec { 
 	const char *pathname; 	
+	int fd; 
 	// fields in ROOT data structure
 	void *fBuffer; 
 	off_t fOffset; 
@@ -29,23 +31,53 @@ struct RIOVec {
 	size_t fOutBytes; 
 }; 
 
+// caller responsible for freeing using free_read_data
+static int make_riovec(const char *pathname, RIOVec *rd) { 
+	rd->pathname = pathname; 
+	rd->fd = open(pathname, O_RDONLY); 
+	if (rd->fd < 0) { 
+		perror("open"); 
+		return 1; 
+	}
+	struct stat st; 
+	if (fstat(rd->fd, &st)) { 
+		perror("fstat"); 
+		return 1; 
+	}
+	rd->fBuffer = malloc(st.st_size); 
+	if (!rd->fBuffer) { 
+	    perror("malloc"); 
+	    return 1; 
+	}
+	rd->fOffset = 0; // read whole file 
+	rd->fSize = st.st_size; 
+	rd->fOutBytes = 0; // set by cqe 
+	return 0; 
+}
+
+void free_read_data(RIOVec *io) { 
+	if (NULL != io->fBuffer) { 
+		free(io->fBuffer); 
+	}
+}
+
+// io_uring demo
+
 static int prep_reads(struct io_uring *ring, RIOVec files[], int num_files) { 
 	struct io_uring_sqe *sqe; 
-	int fd = -1; 
 	for (int i = 0; i < num_files; i++) { 
-		fd = open(files[i].pathname, O_RDONLY); 
-		if (fd < 0) { 
-			perror("open"); 
-			return 1; 
-		}	
 		sqe = io_uring_get_sqe(ring); 
 		if (!sqe) { 
 			fprintf(stderr, "sqe get failed\n"); 
 			return 1; 
 		}
 
-		io_uring_prep_read(sqe, fd, files[i].fBuffer, 
-		    files[i].fSize, files[i].fOffset); 
+		io_uring_prep_read(sqe, 
+		    files[i].fd, 
+			files[i].fBuffer, 
+			files[i].fSize, 
+			files[i].fOffset
+		); 
 		
 		// mark position in files array 
 		sqe->user_data = i; 
@@ -84,38 +116,21 @@ static int reap_reads(struct io_uring *ring, RIOVec files[], int num_files) {
 	return 0; 
 }
 
-// caller responsible for freeing using free_read_data
-#define BUF_SIZE 1024
-RIOVec make_riovec(const char *pathname) { 
-	RIOVec rd; 
-	rd.pathname = pathname; 
-	rd.fBuffer = malloc(BUF_SIZE); 
-	rd.fOffset = 0; 
-	rd.fSize = BUF_SIZE; 
-	rd.fOutBytes = 0; // set by cqe 
-	return rd; 
-}
-
-void free_read_data(RIOVec *io) { 
-	if (NULL != io->fBuffer) { 
-		free(io->fBuffer); 
-	}
-}
-
-#define NUM_FILES 1
-
 int main(int argc, char* argv[]) {
 
-	//if (argc < 2) { 
-	//	printf("%s: file [files...]\n", argv[0]) ; 
-	//	return 1; 
-	//}	
+	if (argc < 2) { 
+		printf("%s: file [files...]\n", argv[0]) ; 
+		return 1; 
+	}	
+	int num_files = argc - 1; 
+	printf("reading %d files\n", num_files); 
 
 	struct io_uring ring;
 	struct io_uring_probe *p; 
 	int ret; 
 
-	ret = io_uring_queue_init(NUM_FILES, &ring, 0 /* flags */);
+	// todo check whether queue size != num_files matters 
+	ret = io_uring_queue_init(num_files, &ring, 0 /* no setup flags */);
 	if (ret) { 
 	    fprintf(stderr, "ring create failed: %d\n", ret); 
 		return 1; 		
@@ -130,14 +145,20 @@ int main(int argc, char* argv[]) {
 	}
 	free(p); 
 
-	RIOVec files[NUM_FILES]; 
-	files[0] = make_riovec("file.txt"); 
-	if (files[0].fBuffer == NULL) { 
-		perror("malloc"); 
+	RIOVec *files = (RIOVec*)calloc(num_files, sizeof(RIOVec)); 
+	if (!files) { 
+		perror("calloc"); 
 		return 1; 
 	}
-
-	ret = prep_reads(&ring, files, NUM_FILES); 
+	for (int i = 0; i < num_files; i++) {
+		int err = make_riovec(argv[i+1], &files[i]); 
+		if (err) { 
+			fprintf(stderr, "initialization failed for file[%d] (%s)\n", i, argv[i+1]); 
+			return 1; 
+		}
+	}
+	
+	ret = prep_reads(&ring, files, num_files); 
 	if (ret) {
 	    fprintf(stderr, "prep reads failed: %d\n", ret); 
 		return 1; 		
@@ -150,13 +171,17 @@ int main(int argc, char* argv[]) {
 	}
 	printf("submitted %d sqes\n", ret); 
 
-	ret = reap_reads(&ring, files, NUM_FILES); 
+	ret = reap_reads(&ring, files, num_files); 
 	if (ret) {
 	    fprintf(stderr, "reap reads failed: %d\n", ret); 
 		return 1; 		
 	}
-
-    free_read_data(&files[0]); 
+	
     io_uring_queue_exit(&ring);
+
+	for (int i = 0; i < num_files; i++) { 
+	    free_read_data(&files[i]); 
+	}
+	free(files); 
     return 0;
 }
