@@ -55,10 +55,10 @@ static int make_riovec(const char *pathname, RIOVec *rd) {
 	return 0; 
 }
 
-void free_read_data(RIOVec *io) { 
-	if (NULL != io->fBuffer) { 
-		free(io->fBuffer); 
-	}
+void free_riovec(RIOVec *io) { 
+    if (NULL != io->fBuffer) { 
+        free(io->fBuffer); 
+    }
 }
 
 // io_uring demo
@@ -179,9 +179,9 @@ int main(int argc, char* argv[]) {
 	
     io_uring_queue_exit(&ring);
 
-	for (int i = 0; i < num_files; i++) { 
-	    free_read_data(&files[i]); 
-	}
-	free(files); 
+    for (int i = 0; i < num_files; i++) { 
+        free_riovec(&files[i]); 
+    }
+    free(files); 
     return 0;
 }
