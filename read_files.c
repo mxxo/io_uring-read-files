@@ -31,7 +31,7 @@ typedef struct RIOVec {
     size_t fOutBytes;
 } RIOVec;
 
-// caller responsible for freeing using free_read_data
+// caller responsible for freeing RIOVec->fBuffer
 static int make_riovec(const char *pathname, RIOVec *rd) {
     rd->pathname = pathname;
     rd->fd = open(pathname, O_RDONLY);
