@@ -10,7 +10,7 @@
 /*
  * Read a number of files in parallel using io_uring
  *
- * g++ -Wall -O2 -o read_files read_files.c -luring
+ * gcc -Wall -O2 -o read_files read_files.c -luring
  *
  * -- Steps --
  * 1. Create the ring
@@ -21,7 +21,7 @@
  *
  */
 
-struct RIOVec {
+typedef struct RIOVec {
     const char *pathname;
     int fd;
     // fields in ROOT data structure
@@ -29,7 +29,7 @@ struct RIOVec {
     off_t fOffset;
     size_t fSize;
     size_t fOutBytes;
-};
+} RIOVec;
 
 // caller responsible for freeing using free_read_data
 static int make_riovec(const char *pathname, RIOVec *rd) {
