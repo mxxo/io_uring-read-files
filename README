@@ -1,0 +1,4 @@
+io_uring-read-files
+-------------------
+
+Short example program that uses io_uring to read files in parallel
